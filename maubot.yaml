@@ -1,0 +1,10 @@
+maubot: 0.1.0
+id: org.jobmachine.kickbot
+version: 0.0.1
+modules:
+  - kickbot
+main_class: KickBot
+extra_files:
+  - base-config.yaml
+database: true  
+database_type: asyncpg
