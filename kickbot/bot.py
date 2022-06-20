@@ -18,7 +18,8 @@ from .db import upgrade_table
 
 class Config(BaseProxyConfig):
     def do_update(self, helper: ConfigUpdateHelper) -> None:
-        helper.copy("exclusion_list")
+        helper.copy("admins")
+        helper.copy("master_room")
 
 
 class KickBot(Plugin):
@@ -32,27 +33,95 @@ class KickBot(Plugin):
         
     @event.on(EventType.ROOM_MESSAGE)
     async def update_user_timestamp(self, evt: MessageEvent) -> None:
-        excluded = evt.sender in self.config["exclusion_list"]
         q = """
-            REPLACE INTO user_events(mxid, last_message_timestamp, ignore_inactivity) 
-            VALUES ($1, $2, $3)
+            REPLACE INTO user_events(mxid, last_message_timestamp) 
+            VALUES ($1, $2)
         """
-        await self.database.execute(q, evt.sender, evt.timestamp, int(excluded))
-        self.log.info("record added")
+        await self.database.execute(q, evt.sender, evt.timestamp)
 
-    #need a command to load/reload full space-member list to user_events table,
-    #if not already in the table set last_message value to 0
+    @command.new("activity", help="track active/inactive status of members of a space")
+    async def activity(self) -> None:
+        pass
 
-    #need a command to return a list of users who are in the space member-list,
-    #but have a last_message value greater than 30 and 60 days AND ignore_activity
-    #value is set to 0
-    #
-    #memberlist = await self.client.get_joined_members(space_room_id)
-    #self.log.info(memberlist.keys())
-    #current_time = int(time.time() * 1000) # get current timestamp to match matrix datestamp formatting
-    #30_days_ago = (current_time - 2592000000) # not useful now but will be when we compare timestamps
-    #60_days_ago = (current_time - 5184000000) # not useful now but will be when we compare timestamps
+    @activity.subcommand("sync", help="update the activity tracker with the current space members \
+            in case they are missing")
+    async def sync_space_members(self, evt: MessageEvent) -> None:
+        if evt.sender in self.config["admins"]:
+            space_members_obj = await self.client.get_joined_members(self.config["master_room"])
+            space_members_list = space_members_obj.keys()
+            table_users = await self.database.fetch("SELECT mxid FROM user_events")
+            table_user_list = [ row["mxid"] for row in table_users ]
+            untracked_users = set(space_members_list) - set(table_user_list)
+            try:
+                for user in untracked_users:
+                    now = int(time.time() * 1000)
+                    q = """
+                        INSERT INTO user_events (mxid, last_message_timestamp)
+                        VALUES ($1, $2)
+                        """
+                    await self.database.execute(q, user, now)
+                    self.log.info(f"{user} inserted into activity tracking table")
+                await evt.react("✅")
+            except Exception as e:
+                self.log.exception(e)
+        else:
+            await evt.reply("lol you don't have permission to do that")
 
+
+    @activity.subcommand("ignore", help="exclude a specific matrix ID from inactivity tracking")
+    @command.argument("mxid", "full matrix ID", required=True)
+    async def ignore_inactivity(self, evt: MessageEvent, mxid: UserID) -> None:
+        if evt.sender in self.config["admins"]:
+            try:
+                Client.parse_user_id(mxid)
+                await self.database.execute("UPDATE user_events SET ignore_inactivity = 1 WHERE \
+                        mxid = $1", mxid)
+                self.log.info(f"{mxid} set to ignore inactivity")
+                await evt.react("✅")
+            except Exception as e:
+                await evt.respond(f"{e}")
+        else:
+            await evt.reply("lol you don't have permission to set that")
+
+    @activity.subcommand("unignore", help="re-enable activity tracking for a specific matrix ID")
+    @command.argument("mxid", "full matrix ID", required=True)
+    async def ignore_inactivity(self, evt: MessageEvent, mxid: UserID) -> None:
+        if evt.sender in self.config["admins"]:
+            try:
+                Client.parse_user_id(mxid)
+                await self.database.execute("UPDATE user_events SET ignore_inactivity = 0 WHERE \
+                        mxid = $1", mxid)
+                self.log.info(f"{mxid} set to track inactivity")
+                await evt.react("✅")
+            except Exception as e:
+                await evt.respond(f"{e}")
+        else:
+            await evt.reply("lol you don't have permission to set that")
+
+    @activity.subcommand("snitch", help='generate a list of matrix IDs that have been inactive')
+    async def generate_report(self, evt: MessageEvent) -> None:
+        now = int(time.time() * 1000)
+        one_mo_ago = (now - 2592000000)
+        two_mo_ago = (now - 5184000000)
+        one_mo_q = """
+            SELECT mxid FROM user_events WHERE last_message_timestamp <= $1 AND 
+            last_message_timestamp >= $2
+            AND ignore_inactivity = 0
+            """
+        two_mo_q = """
+            SELECT mxid FROM user_events WHERE last_message_timestamp <= $1
+            AND ignore_inactivity = 0
+            """
+        one_mo_inactive_results = await self.database.fetch(one_mo_q, one_mo_ago, two_mo_ago)
+        two_mo_inactive_results = await self.database.fetch(two_mo_q, two_mo_ago)
+        one_mo_inactive = [ row["mxid"] for row in one_mo_inactive_results ] or ["none"]
+        two_mo_inactive = [ row["mxid"] for row in two_mo_inactive_results ] or ["none"]
+        await evt.respond(f"<b>Users inactive for one month:</b> {', '.join(one_mo_inactive)} <br>\
+                <b>Users inactive for two months:</b> {', '.join(two_mo_inactive)}", \
+                allow_html=True)
+
+    #need to somehow regularly fetch and update the list of room ids that are associated with a given space
+    #to track events within so that we are actually only paying attention to those rooms
 
     @classmethod
     def get_db_upgrade_table(cls) -> None:
