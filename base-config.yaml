@@ -1,6 +1,12 @@
 # the room-id of the matrix room or space to use as your "full user list"
 master_room: "!somerandomcharacters:server.tld"
 
+# number of days of inactivity to be considered in the "warning zone"
+warn_threshold_days: 30
+
+# number of days of inactivity to be considered in the "danger zone"
+kick_threshold_days: 60
+
 # list of users who can add mxids to the exclusion list
 admins:
   - '@user1:server.tld'

@@ -20,6 +20,8 @@ class Config(BaseProxyConfig):
     def do_update(self, helper: ConfigUpdateHelper) -> None:
         helper.copy("admins")
         helper.copy("master_room")
+        helper.copy("warn_threshold_days")
+        helper.copy("kick_threshold_days")
 
 
 class KickBot(Plugin):
@@ -52,6 +54,7 @@ class KickBot(Plugin):
             table_users = await self.database.fetch("SELECT mxid FROM user_events")
             table_user_list = [ row["mxid"] for row in table_users ]
             untracked_users = set(space_members_list) - set(table_user_list)
+            non_space_members = set(table_user_list) - set(space_members_list)
             try:
                 for user in untracked_users:
                     now = int(time.time() * 1000)
@@ -61,6 +64,9 @@ class KickBot(Plugin):
                         """
                     await self.database.execute(q, user, now)
                     self.log.info(f"{user} inserted into activity tracking table")
+                for user in non_space_members:
+                    await self.database.execute("DELETE FROM user_events WHERE mxid = $1", user)
+                    self.log.info(f"{user} is not a space member, dropped from activity tracking table")
                 await evt.react("✅")
             except Exception as e:
                 self.log.exception(e)
@@ -101,23 +107,25 @@ class KickBot(Plugin):
     @activity.subcommand("snitch", help='generate a list of matrix IDs that have been inactive')
     async def generate_report(self, evt: MessageEvent) -> None:
         now = int(time.time() * 1000)
-        one_mo_ago = (now - 2592000000)
-        two_mo_ago = (now - 5184000000)
-        one_mo_q = """
+        warn_days_ago = (now - (1000 * 60 * 60 * 24 * self.config["warn_threshold_days"]))
+        kick_days_ago = (now - (1000 * 60 * 60 * 24 * self.config["kick_threshold_days"]))
+        warn_q = """
             SELECT mxid FROM user_events WHERE last_message_timestamp <= $1 AND 
             last_message_timestamp >= $2
             AND ignore_inactivity = 0
             """
-        two_mo_q = """
+        kick_q = """
             SELECT mxid FROM user_events WHERE last_message_timestamp <= $1
             AND ignore_inactivity = 0
             """
-        one_mo_inactive_results = await self.database.fetch(one_mo_q, one_mo_ago, two_mo_ago)
-        two_mo_inactive_results = await self.database.fetch(two_mo_q, two_mo_ago)
-        one_mo_inactive = [ row["mxid"] for row in one_mo_inactive_results ] or ["none"]
-        two_mo_inactive = [ row["mxid"] for row in two_mo_inactive_results ] or ["none"]
-        await evt.respond(f"<b>Users inactive for one month:</b> {', '.join(one_mo_inactive)} <br>\
-                <b>Users inactive for two months:</b> {', '.join(two_mo_inactive)}", \
+        warn_inactive_results = await self.database.fetch(warn_q, warn_days_ago, kick_days_ago)
+        kick_inactive_results = await self.database.fetch(kick_q, kick_days_ago)
+        warn_inactive = [ row["mxid"] for row in warn_inactive_results ] or ["none"]
+        kick_inactive = [ row["mxid"] for row in kick_inactive_results ] or ["none"]
+        await evt.respond(f"<b>Users inactive for {self.config['warn_threshold_days']} days:</b> \
+                {', '.join(warn_inactive)} <br>\
+                <b>Users inactive for {self.config['kick_threshold_days']} days:</b> \
+                {', '.join(kick_inactive)}", \
                 allow_html=True)
 
     #need to somehow regularly fetch and update the list of room ids that are associated with a given space
