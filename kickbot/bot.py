@@ -25,9 +25,6 @@ class Config(BaseProxyConfig):
 
 
 class KickBot(Plugin):
-    # database table related things
-#   kickbot_t: Type[KickBot]
-#   version: Type[Version]
 
     async def start(self) -> None:
         await super().start()
