@@ -7,6 +7,10 @@ warn_threshold_days: 30
 # number of days of inactivity to be considered in the "danger zone"
 kick_threshold_days: 60
 
+# track reactions? if false, will only track activity based on normal message events, but if true
+# will update the user's last-active date when they add a reaction to a message
+track_reactions: True
+
 # list of users who can add mxids to the exclusion list
 admins:
   - '@user1:server.tld'

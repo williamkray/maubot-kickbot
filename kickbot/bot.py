@@ -20,6 +20,7 @@ class Config(BaseProxyConfig):
     def do_update(self, helper: ConfigUpdateHelper) -> None:
         helper.copy("admins")
         helper.copy("master_room")
+        helper.copy("track_reactions")
         helper.copy("warn_threshold_days")
         helper.copy("kick_threshold_days")
 
@@ -31,12 +32,23 @@ class KickBot(Plugin):
         self.config.load_and_update()
         
     @event.on(EventType.ROOM_MESSAGE)
-    async def update_user_timestamp(self, evt: MessageEvent) -> None:
+    async def update_message_timestamp(self, evt: MessageEvent) -> None:
         q = """
             REPLACE INTO user_events(mxid, last_message_timestamp) 
             VALUES ($1, $2)
         """
         await self.database.execute(q, evt.sender, evt.timestamp)
+
+    @event.on(EventType.REACTION)
+    async def update_reaction_timestamp(self, evt: MessageEvent) -> None:
+        if not self.config["track_reactions"]:
+            pass
+        else:
+            q = """
+                REPLACE INTO user_events(mxid, last_message_timestamp) 
+                VALUES ($1, $2)
+            """
+            await self.database.execute(q, evt.sender, evt.timestamp)
 
     @command.new("activity", help="track active/inactive status of members of a space")
     async def activity(self) -> None:
