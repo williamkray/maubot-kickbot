@@ -83,7 +83,8 @@ class KickBot(Plugin):
             await evt.reply("lol you don't have permission to do that")
 
 
-    @activity.subcommand("ignore", help="exclude a specific matrix ID from inactivity tracking")
+    @activity.subcommand("ignore", help="exclude a specific matrix ID from inactivity tracking until their next \
+                            trackable event (temporary exemption from inactivity reporting)")
     @command.argument("mxid", "full matrix ID", required=True)
     async def ignore_inactivity(self, evt: MessageEvent, mxid: UserID) -> None:
         if evt.sender in self.config["admins"]:
