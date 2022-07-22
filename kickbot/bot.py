@@ -64,6 +64,8 @@ class KickBot(Plugin):
             table_user_list = [ row["mxid"] for row in table_users ]
             untracked_users = set(space_members_list) - set(table_user_list)
             non_space_members = set(table_user_list) - set(space_members_list)
+            added = []
+            dropped = []
             try:
                 for user in untracked_users:
                     now = int(time.time() * 1000)
@@ -72,11 +74,18 @@ class KickBot(Plugin):
                         VALUES ($1, $2)
                         """
                     await self.database.execute(q, user, now)
+                    added.append(user)
                     self.log.info(f"{user} inserted into activity tracking table")
                 for user in non_space_members:
                     await self.database.execute("DELETE FROM user_events WHERE mxid = $1", user)
                     self.log.info(f"{user} is not a space member, dropped from activity tracking table")
+                    dropped.append(user)
                 await evt.react("✅")
+
+                added_str = "<br />".join(added)
+                dropped_str = "<br />".join(dropped)
+                await evt.respond(f"Added: {added_str}<br /><br />Dropped: {dropped_str}", allow_html=True)
+
             except Exception as e:
                 self.log.exception(e)
         else:
