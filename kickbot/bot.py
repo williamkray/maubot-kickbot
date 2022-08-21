@@ -141,10 +141,10 @@ class KickBot(Plugin):
         kick_inactive_results = await self.database.fetch(kick_q, kick_days_ago)
         warn_inactive = [ row["mxid"] for row in warn_inactive_results ] or ["none"]
         kick_inactive = [ row["mxid"] for row in kick_inactive_results ] or ["none"]
-        await evt.respond(f"<b>Users inactive for {self.config['warn_threshold_days']} days:</b> \
-                {', '.join(warn_inactive)} <br>\
-                <b>Users inactive for {self.config['kick_threshold_days']} days:</b> \
-                {', '.join(kick_inactive)}", \
+        await evt.respond(f"<b>Users inactive for {self.config['warn_threshold_days']} days:</b><br /> \
+                {'<br />'.join(warn_inactive)} <br />\
+                <b>Users inactive for {self.config['kick_threshold_days']} days:</b><br /> \
+                {'<br />'.join(kick_inactive)}", \
                 allow_html=True)
 
     #need to somehow regularly fetch and update the list of room ids that are associated with a given space
