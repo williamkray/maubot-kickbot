@@ -150,6 +150,28 @@ class KickBot(Plugin):
     #need to somehow regularly fetch and update the list of room ids that are associated with a given space
     #to track events within so that we are actually only paying attention to those rooms
 
+    ## loop through each room and report people who are "guests" (in the room, but not members of the space)
+    @activity.subcommand("guests", help="generate a list of members in this room who are not members of the parent space")
+    async def get_guestlist(self, evt: MessageEvent) -> None:
+        if evt.sender in self.config["admins"]:
+            space_members_obj = await self.client.get_joined_members(self.config["master_room"])
+            space_members_list = space_members_obj.keys()
+            room_members_obj = await self.client.get_joined_members(evt.room_id)
+            room_members_list = room_members_obj.keys()
+
+            # find the non-space members in the room member list
+            try:
+                guest_list = set(room_members_list) - set(space_members_list)
+                if len(guest_list) == 0:
+                    guest_list = ["None"]
+                await evt.reply(f"<b>Guests in this room are:</b><br /> \
+                        {'<br />'.join(guest_list)}", allow_html=True)
+            except Exception as e:
+                await evt.respond(f"something went wrong: {e}")
+        else:
+            await evt.reply("lol you don't have permission to set that")
+
+
     @classmethod
     def get_db_upgrade_table(cls) -> None:
         return upgrade_table
