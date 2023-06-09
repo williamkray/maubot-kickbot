@@ -151,11 +151,25 @@ class KickBot(Plugin):
     #to track events within so that we are actually only paying attention to those rooms
 
     ## loop through each room and report people who are "guests" (in the room, but not members of the space)
-    @activity.subcommand("guests", help="generate a list of members in this room who are not members of the parent space")
-    async def get_guestlist(self, evt: MessageEvent) -> None:
+    @activity.subcommand("guests", help="generate a list of members in a room who are not members of the parent space")
+    @command.argument("room", required=False)
+    async def get_guestlist(self, evt: MessageEvent, room: str) -> None:
         space_members_obj = await self.client.get_joined_members(self.config["master_room"])
         space_members_list = space_members_obj.keys()
-        room_members_obj = await self.client.get_joined_members(evt.room_id)
+        room_id = None
+        if room:
+            if room.startswith('#'):
+                try:
+                    thatroom_id = await self.client.resolve_room_alias(room)
+                    room_id = thatroom_id["room_id"]
+                except:
+                    evt.reply("i don't recognize that room, sorry")
+                    return
+            else:
+                room_id = room
+        else:
+            room_id = evt.room_id
+        room_members_obj = await self.client.get_joined_members(room_id)
         room_members_list = room_members_obj.keys()
 
         # find the non-space members in the room member list
