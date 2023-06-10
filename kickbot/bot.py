@@ -30,6 +30,11 @@ class KickBot(Plugin):
     async def start(self) -> None:
         await super().start()
         self.config.load_and_update()
+
+    async def get_space_roomlist(self) -> None:
+        space_state = await self.client.get_state(self.config["master_room"])
+        children = space_state[EventType.SPACE_CHILD]
+        return children
         
     @event.on(EventType.ROOM_MESSAGE)
     async def update_message_timestamp(self, evt: MessageEvent) -> None:
@@ -53,6 +58,11 @@ class KickBot(Plugin):
     @command.new("activity", help="track active/inactive status of members of a space")
     async def activity(self) -> None:
         pass
+
+    @activity.subcommand("rooms", help="test command to get rooms in the space")
+    async def get_rooms(self, evt: MessageEvent) -> None:
+        msg = await self.get_space_roomlist
+        await evt.respond(msg)
 
     @activity.subcommand("sync", help="update the activity tracker with the current space members \
             in case they are missing")
