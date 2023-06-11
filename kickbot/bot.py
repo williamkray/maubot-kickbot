@@ -184,37 +184,41 @@ class KickBot(Plugin):
     @activity.subcommand("purge", help='kick users for excessive inactivity')
     async def kick_users(self, evt: MessageEvent) -> None:
         await evt.mark_read()
-        msg = await evt.respond("starting the purge...")
-        report = await self.generate_report()
-        purgeable = report['kick_inactive']
-        roomlist = await self.get_space_roomlist()
-        # don't forget to kick from the space itself
-        roomlist.append(self.config["master_room"])
-        purge_list = {}
-        error_list = {}
+        if evt.sender in self.config["admins"]:
+            msg = await evt.respond("starting the purge...")
+            report = await self.generate_report()
+            purgeable = report['kick_inactive']
+            roomlist = await self.get_space_roomlist()
+            # don't forget to kick from the space itself
+            roomlist.append(self.config["master_room"])
+            purge_list = {}
+            error_list = {}
 
-        for user in purgeable:
-            purge_list[user] = []
-            for room in roomlist:
-                try:
-                    await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
-                    await self.client.kick_user(room, user, reason='inactivity')
-                    purge_list[user].append(room)
-                    time.sleep(0.5)
-                except MNotFound:
-                    pass
-                except Exception as e:
-                    self.log.warning(e)
-                    error_list[user] = []
-                    error_list[user].append(room)
+            for user in purgeable:
+                purge_list[user] = []
+                for room in roomlist:
+                    try:
+                        await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
+                        await self.client.kick_user(room, user, reason='inactivity')
+                        purge_list[user].append(room)
+                        time.sleep(0.5)
+                    except MNotFound:
+                        pass
+                    except Exception as e:
+                        self.log.warning(e)
+                        error_list[user] = []
+                        error_list[user].append(room)
 
-
-        results = "the following users were purged:<p><code>{purge_list}</code></p>the following errors were \
-                recorded:<p><code>{error_list}</code></p>".format(purge_list=purge_list, error_list=error_list)
-        await evt.respond(results, allow_html=True, edits=msg)
+            results = "the following users were purged:<p><code>{purge_list}</code></p>the following errors were \
+                    recorded:<p><code>{error_list}</code></p>".format(purge_list=purge_list, error_list=error_list)
+            await evt.respond(results, allow_html=True, edits=msg)
         
-        # sync our database after we've made changes to room memberships
-        await self.do_sync()
+            # sync our database after we've made changes to room memberships
+            await self.do_sync()
+
+        else:
+            await evt.reply("lol you don't have permission to do that")
+
 
 
 
