@@ -4,9 +4,10 @@ from typing import Awaitable, Type, Optional, Tuple
 import json
 import time
 
-from mautrix.client import Client
+from mautrix.client import Client, InternalEventType, MembershipEventDispatcher
 from mautrix.types import (Event, StateEvent, EventID, UserID, FileInfo, EventType,
                             MediaMessageEventContent, ReactionEvent, RedactionEvent)
+from mautrix.errors import MNotFound
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from maubot import Plugin, MessageEvent
 from maubot.handlers import command, event
@@ -30,12 +31,77 @@ class KickBot(Plugin):
     async def start(self) -> None:
         await super().start()
         self.config.load_and_update()
+        self.client.add_dispatcher(MembershipEventDispatcher)
+
+
+    async def do_sync(self) -> None:
+        space_members_obj = await self.client.get_joined_members(self.config["master_room"])
+        space_members_list = space_members_obj.keys()
+        table_users = await self.database.fetch("SELECT mxid FROM user_events")
+        table_user_list = [ row["mxid"] for row in table_users ]
+        untracked_users = set(space_members_list) - set(table_user_list)
+        non_space_members = set(table_user_list) - set(space_members_list)
+        results = {}
+        results['added'] = []
+        results['dropped'] = []
+        try:
+            for user in untracked_users:
+                now = int(time.time() * 1000)
+                q = """
+                    INSERT INTO user_events (mxid, last_message_timestamp)
+                    VALUES ($1, $2)
+                    """
+                await self.database.execute(q, user, now)
+                results['added'].append(user)
+                self.log.info(f"{user} inserted into activity tracking table")
+            for user in non_space_members:
+                await self.database.execute("DELETE FROM user_events WHERE mxid = $1", user)
+                self.log.info(f"{user} is not a space member, dropped from activity tracking table")
+                results['dropped'].append(user)
+
+        except Exception as e:
+            self.log.exception(e)
+
+        return results
 
     async def get_space_roomlist(self) -> None:
-        space_state = await self.client.get_state(self.config["master_room"])
-        children = space_state[EventType.SPACE_CHILD]
-        return children
+        space = self.config["master_room"]
+        rooms = []
+        state = await self.client.get_state(space)
+        for evt in state:
+            if evt.type == EventType.SPACE_CHILD:
+                # only look for rooms that include a via path, otherwise they
+                # are not really in the space!
+                if evt.content and evt.content.via:
+                    rooms.append(evt.state_key)
+        return rooms
+
+    async def generate_report(self) -> None:
+        now = int(time.time() * 1000)
+        warn_days_ago = (now - (1000 * 60 * 60 * 24 * self.config["warn_threshold_days"]))
+        kick_days_ago = (now - (1000 * 60 * 60 * 24 * self.config["kick_threshold_days"]))
+        warn_q = """
+            SELECT mxid FROM user_events WHERE last_message_timestamp <= $1 AND 
+            last_message_timestamp >= $2
+            AND ignore_inactivity = 0
+            """
+        kick_q = """
+            SELECT mxid FROM user_events WHERE last_message_timestamp <= $1
+            AND ignore_inactivity = 0
+            """
+        warn_inactive_results = await self.database.fetch(warn_q, warn_days_ago, kick_days_ago)
+        kick_inactive_results = await self.database.fetch(kick_q, kick_days_ago)
+        report = {}
+        report["warn_inactive"] = [ row["mxid"] for row in warn_inactive_results ] or ["none"]
+        report["kick_inactive"] = [ row["mxid"] for row in kick_inactive_results ] or ["none"]
+
+        return report
         
+    @event.on(InternalEventType.JOIN)
+    async def passive_sync(self, evt:StateEvent) -> None:
+        if evt.room_id == self.config['master_room']:
+            await self.do_sync()
+
     @event.on(EventType.ROOM_MESSAGE)
     async def update_message_timestamp(self, evt: MessageEvent) -> None:
         q = """
@@ -59,45 +125,16 @@ class KickBot(Plugin):
     async def activity(self) -> None:
         pass
 
-    @activity.subcommand("rooms", help="test command to get rooms in the space")
-    async def get_rooms(self, evt: MessageEvent) -> None:
-        msg = await self.get_space_roomlist
-        await evt.respond(msg)
 
     @activity.subcommand("sync", help="update the activity tracker with the current space members \
             in case they are missing")
     async def sync_space_members(self, evt: MessageEvent) -> None:
         if evt.sender in self.config["admins"]:
-            space_members_obj = await self.client.get_joined_members(self.config["master_room"])
-            space_members_list = space_members_obj.keys()
-            table_users = await self.database.fetch("SELECT mxid FROM user_events")
-            table_user_list = [ row["mxid"] for row in table_users ]
-            untracked_users = set(space_members_list) - set(table_user_list)
-            non_space_members = set(table_user_list) - set(space_members_list)
-            added = []
-            dropped = []
-            try:
-                for user in untracked_users:
-                    now = int(time.time() * 1000)
-                    q = """
-                        INSERT INTO user_events (mxid, last_message_timestamp)
-                        VALUES ($1, $2)
-                        """
-                    await self.database.execute(q, user, now)
-                    added.append(user)
-                    self.log.info(f"{user} inserted into activity tracking table")
-                for user in non_space_members:
-                    await self.database.execute("DELETE FROM user_events WHERE mxid = $1", user)
-                    self.log.info(f"{user} is not a space member, dropped from activity tracking table")
-                    dropped.append(user)
-                await evt.react("✅")
+            results = await self.do_sync()
 
-                added_str = "<br />".join(added)
-                dropped_str = "<br />".join(dropped)
-                await evt.respond(f"Added: {added_str}<br /><br />Dropped: {dropped_str}", allow_html=True)
-
-            except Exception as e:
-                self.log.exception(e)
+            added_str = "<br />".join(results['added'])
+            dropped_str = "<br />".join(results['dropped'])
+            await evt.respond(f"Added: {added_str}<br /><br />Dropped: {dropped_str}", allow_html=True)
         else:
             await evt.reply("lol you don't have permission to do that")
 
@@ -120,7 +157,7 @@ class KickBot(Plugin):
 
     @activity.subcommand("unignore", help="re-enable activity tracking for a specific matrix ID")
     @command.argument("mxid", "full matrix ID", required=True)
-    async def ignore_inactivity(self, evt: MessageEvent, mxid: UserID) -> None:
+    async def unignore_inactivity(self, evt: MessageEvent, mxid: UserID) -> None:
         if evt.sender in self.config["admins"]:
             try:
                 Client.parse_user_id(mxid)
@@ -133,29 +170,53 @@ class KickBot(Plugin):
         else:
             await evt.reply("lol you don't have permission to set that")
 
-    @activity.subcommand("snitch", help='generate a list of matrix IDs that have been inactive')
-    async def generate_report(self, evt: MessageEvent) -> None:
-        now = int(time.time() * 1000)
-        warn_days_ago = (now - (1000 * 60 * 60 * 24 * self.config["warn_threshold_days"]))
-        kick_days_ago = (now - (1000 * 60 * 60 * 24 * self.config["kick_threshold_days"]))
-        warn_q = """
-            SELECT mxid FROM user_events WHERE last_message_timestamp <= $1 AND 
-            last_message_timestamp >= $2
-            AND ignore_inactivity = 0
-            """
-        kick_q = """
-            SELECT mxid FROM user_events WHERE last_message_timestamp <= $1
-            AND ignore_inactivity = 0
-            """
-        warn_inactive_results = await self.database.fetch(warn_q, warn_days_ago, kick_days_ago)
-        kick_inactive_results = await self.database.fetch(kick_q, kick_days_ago)
-        warn_inactive = [ row["mxid"] for row in warn_inactive_results ] or ["none"]
-        kick_inactive = [ row["mxid"] for row in kick_inactive_results ] or ["none"]
+    @activity.subcommand("report", help='generate a list of matrix IDs that have been inactive')
+    async def get_report(self, evt: MessageEvent) -> None:
+        sync_results = await self.do_sync()
+        report = await self.generate_report()
         await evt.respond(f"<b>Users inactive for {self.config['warn_threshold_days']} days:</b><br /> \
-                {'<br />'.join(warn_inactive)} <br />\
+                {'<br />'.join(report['warn_inactive'])} <br />\
                 <b>Users inactive for {self.config['kick_threshold_days']} days:</b><br /> \
-                {'<br />'.join(kick_inactive)}", \
+                {'<br />'.join(report['kick_inactive'])}", \
                 allow_html=True)
+
+
+    @activity.subcommand("purge", help='kick users for excessive inactivity')
+    async def kick_users(self, evt: MessageEvent) -> None:
+        await evt.mark_read()
+        msg = await evt.respond("starting the purge...")
+        report = await self.generate_report()
+        purgeable = report['kick_inactive']
+        roomlist = await self.get_space_roomlist()
+        # don't forget to kick from the space itself
+        roomlist.append(self.config["master_room"])
+        purge_list = {}
+        error_list = {}
+
+        for user in purgeable:
+            purge_list[user] = []
+            for room in roomlist:
+                try:
+                    await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
+                    await self.client.kick_user(room, user, reason='inactivity')
+                    purge_list[user].append(room)
+                    time.sleep(0.5)
+                except MNotFound:
+                    pass
+                except Exception as e:
+                    self.log.warning(e)
+                    error_list[user] = []
+                    error_list[user].append(room)
+
+
+        results = "the following users were purged:<p><code>{purge_list}</code></p>the following errors were \
+                recorded:<p><code>{error_list}</code></p>".format(purge_list=purge_list, error_list=error_list)
+        await evt.respond(results, allow_html=True, edits=msg)
+        
+        # sync our database after we've made changes to room memberships
+        await self.do_sync()
+
+
 
     #need to somehow regularly fetch and update the list of room ids that are associated with a given space
     #to track events within so that we are actually only paying attention to those rooms
