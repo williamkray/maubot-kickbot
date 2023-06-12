@@ -174,9 +174,9 @@ class KickBot(Plugin):
     async def get_report(self, evt: MessageEvent) -> None:
         sync_results = await self.do_sync()
         report = await self.generate_report()
-        await evt.respond(f"<b>Users inactive for {self.config['warn_threshold_days']} days:</b><br /> \
+        await evt.respond(f"<b>Users inactive for at least {self.config['warn_threshold_days']} days:</b><br /> \
                 {'<br />'.join(report['warn_inactive'])} <br />\
-                <b>Users inactive for {self.config['kick_threshold_days']} days:</b><br /> \
+                <b>Users inactive for at least {self.config['kick_threshold_days']} days:</b><br /> \
                 {'<br />'.join(report['kick_inactive'])}", \
                 allow_html=True)
 
