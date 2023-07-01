@@ -197,10 +197,11 @@ class KickBot(Plugin):
             for user in purgeable:
                 purge_list[user] = []
                 for room in roomlist:
-                    roomnamestate = await self.client.get_state_event(room, 'm.room.name')
-                    roomname = roomnamestate['name']
-
                     try:
+                        roomname = None
+                        roomnamestate = await self.client.get_state_event(room, 'm.room.name')
+                        roomname = roomnamestate['name']
+
                         await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
                         await self.client.kick_user(room, user, reason='inactivity')
                         if roomname:
@@ -213,10 +214,7 @@ class KickBot(Plugin):
                     except Exception as e:
                         self.log.warning(e)
                         error_list[user] = []
-                        if roomname:
-                            error_list[user].append(roomname)
-                        else:
-                            error_list[user].append(room)
+                        error_list[user].append(roomname or room)
 
 
             results = "the following users were purged:<p><code>{purge_list}</code></p>the following errors were \
