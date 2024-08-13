@@ -228,6 +228,52 @@ class KickBot(Plugin):
             await evt.reply("lol you don't have permission to do that")
 
 
+    @activity.subcommand("kick", help='kick a specific user from the community and all rooms')
+    @command.argument("mxid", "full matrix ID", required=True)
+    async def kick_user(self, evt: MessageEvent, mxid: UserID) -> None:
+        await evt.mark_read()
+        if evt.sender in self.config["admins"]:
+            user = mxid
+            msg = await evt.respond("starting the purge...")
+            roomlist = await self.get_space_roomlist()
+            # don't forget to kick from the space itself
+            roomlist.append(self.config["master_room"])
+            purge_list = {}
+            error_list = {}
+
+            purge_list[user] = []
+            for room in roomlist:
+                try:
+                    roomname = None
+                    roomnamestate = await self.client.get_state_event(room, 'm.room.name')
+                    roomname = roomnamestate['name']
+
+                    await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
+                    await self.client.kick_user(room, user, reason='kicked')
+                    if roomname:
+                        purge_list[user].append(roomname)
+                    else:
+                        purge_list[user].append(room)
+                    time.sleep(0.5)
+                except MNotFound:
+                    pass
+                except Exception as e:
+                    self.log.warning(e)
+                    error_list[user] = []
+                    error_list[user].append(roomname or room)
+
+
+            results = "the following users were kicked:<p><code>{purge_list}</code></p>the following errors were \
+                    recorded:<p><code>{error_list}</code></p>".format(purge_list=purge_list, error_list=error_list)
+            await evt.respond(results, allow_html=True, edits=msg)
+        
+            # sync our database after we've made changes to room memberships
+            await self.do_sync()
+
+        else:
+            await evt.reply("lol you don't have permission to do that")
+
+
 
 
     #need to somehow regularly fetch and update the list of room ids that are associated with a given space
