@@ -274,6 +274,98 @@ class KickBot(Plugin):
             await evt.reply("lol you don't have permission to do that")
 
 
+    @activity.subcommand("ban", help='kick and ban a specific user from the community and all rooms')
+    @command.argument("mxid", "full matrix ID", required=True)
+    async def ban_user(self, evt: MessageEvent, mxid: UserID) -> None:
+        await evt.mark_read()
+        if evt.sender in self.config["admins"]:
+            user = mxid
+            msg = await evt.respond("starting the ban...")
+            roomlist = await self.get_space_roomlist()
+            # don't forget to kick from the space itself
+            roomlist.append(self.config["master_room"])
+            ban_list = {}
+            error_list = {}
+
+            ban_list[user] = []
+            for room in roomlist:
+                try:
+                    roomname = None
+                    roomnamestate = await self.client.get_state_event(room, 'm.room.name')
+                    roomname = roomnamestate['name']
+
+                    await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
+                    await self.client.ban_user(room, user, reason='banned')
+                    if roomname:
+                        ban_list[user].append(roomname)
+                    else:
+                        ban_list[user].append(room)
+                    time.sleep(0.5)
+                except MNotFound:
+                    pass
+                except Exception as e:
+                    self.log.warning(e)
+                    error_list[user] = []
+                    error_list[user].append(roomname or room)
+
+
+            results = "the following users were kicked and banned:<p><code>{ban_list}</code></p>the following errors were \
+                    recorded:<p><code>{error_list}</code></p>".format(ban_list=ban_list, error_list=error_list)
+            await evt.respond(results, allow_html=True, edits=msg)
+        
+            # sync our database after we've made changes to room memberships
+            await self.do_sync()
+
+        else:
+            await evt.reply("lol you don't have permission to do that")
+
+
+    @activity.subcommand("unban", help='unban a specific user from the community and all rooms')
+    @command.argument("mxid", "full matrix ID", required=True)
+    async def unban_user(self, evt: MessageEvent, mxid: UserID) -> None:
+        await evt.mark_read()
+        if evt.sender in self.config["admins"]:
+            user = mxid
+            msg = await evt.respond("starting the unban...")
+            roomlist = await self.get_space_roomlist()
+            # don't forget to kick from the space itself
+            roomlist.append(self.config["master_room"])
+            unban_list = {}
+            error_list = {}
+
+            unban_list[user] = []
+            for room in roomlist:
+                try:
+                    roomname = None
+                    roomnamestate = await self.client.get_state_event(room, 'm.room.name')
+                    roomname = roomnamestate['name']
+
+                    await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
+                    await self.client.unban_user(room, user, reason='unbanned')
+                    if roomname:
+                        unban_list[user].append(roomname)
+                    else:
+                        unban_list[user].append(room)
+                    time.sleep(0.5)
+                except MNotFound:
+                    pass
+                except Exception as e:
+                    self.log.warning(e)
+                    error_list[user] = []
+                    error_list[user].append(roomname or room)
+
+
+            results = "the following users were unbanned:<p><code>{unban_list}</code></p>the following errors were \
+                    recorded:<p><code>{error_list}</code></p>".format(unban_list=unban_list, error_list=error_list)
+            await evt.respond(results, allow_html=True, edits=msg)
+        
+            # sync our database after we've made changes to room memberships
+            await self.do_sync()
+
+        else:
+            await evt.reply("lol you don't have permission to do that")
+
+
 
 
     #need to somehow regularly fetch and update the list of room ids that are associated with a given space
