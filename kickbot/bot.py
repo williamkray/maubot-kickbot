@@ -294,7 +294,8 @@ class KickBot(Plugin):
                     roomnamestate = await self.client.get_state_event(room, 'm.room.name')
                     roomname = roomnamestate['name']
 
-                    await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
+                    # ban user even if they're not in the room!
+                    #await self.client.get_state_event(room, EventType.ROOM_MEMBER, user)
                     await self.client.ban_user(room, user, reason='banned')
                     if roomname:
                         ban_list[user].append(roomname)
