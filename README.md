@@ -1,5 +1,8 @@
 # kickbot
 
+# this plugin is now deprecated, and its functionality (and improvements!) have been moved into
+[communitybot](https://github.com/williamkray/maubot-communitybot)
+
 a maubot plugin that attempts to assist administrators of communities on matrix, based on the concept of matrix spaces.
 
 # features
